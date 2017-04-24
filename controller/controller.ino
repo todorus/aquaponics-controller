@@ -1,13 +1,5 @@
 #include <ESP8266WiFi.h>
 
-const int PIN_BUTTON = 16;
-
-WiFiServer server(80);
-const char* SSID_NAME = "ESP8266WiFi";
-
-bool inConfigMode = false;
-bool wasInConfigMode = false;
-
 struct network {
   String ssid;
   int32_t rssi;
@@ -17,6 +9,15 @@ struct scan {
   unsigned int ssidCount;
   network * networks;
 };
+
+const int PIN_BUTTON = 16;
+
+WiFiServer server(80);
+const char* SSID_NAME = "ESP8266WiFi";
+
+bool inConfigMode = false;
+bool wasInConfigMode = false;
+scan scanResult;
 
 void setup() {
   Serial.begin(115200);
@@ -32,12 +33,14 @@ void loop(){
     if(inConfigMode){
       setupAp();
       printWifiStatus();
+      scanResult = fetchNetworks();
     }
-    wasInConfigMode = inConfigMode;
   }
   if(inConfigMode){
-    configMode();
+    configMode(scanResult, wasInConfigMode);
   }
+
+  wasInConfigMode = inConfigMode;
 }
 
 void setupAp()
@@ -51,58 +54,55 @@ void setupAp()
   Serial.println(WiFi.softAPIP());
 }
 
-void configMode(){
-  scan scanResult = fetchNetworks();
-  listNetworks(scanResult);
+void configMode(scan scanResult, boolean prevConfigMode){
 
-  Serial.println("looking for clients");
-  for(unsigned int x=0 ; x < 10000; x++){
-    WiFiClient client = server.available(); 
-    if(x % 1000 == 0)
-    {
-      Serial.print(".");
-    }
-    if (client)
-    {
-      // we have a new client sending some request
-      Serial.println("clientfigmode");
-      
-      // an http request ends with a blank line
-      boolean currentLineIsBlank = true;
-      while (client.connected()) {
-        if (client.available()) {
-          char c = client.read();
-          Serial.write(c);
-          // if you've gotten to the end of the line (received a newline
-          // character) and the line is blank, the http request has ended,
-          // so you can send a reply
-          if (c == '\n' && currentLineIsBlank) {
-            client.print(prepareHtmlPage(scanResult));
-          }
-          if (c == '\n') {
-            // you're starting a new line
-            currentLineIsBlank = true;
-          } 
-          else if (c != '\r') {
-            // you've gotten a character on the current line
-            currentLineIsBlank = false;
-          }
+  if(!prevConfigMode)
+  {
+    Serial.println("looking for clients");
+    Serial.print(".");
+  }
+  WiFiClient client = server.available(); 
+  if (client)
+  { 
+    // we have a new client sending some request
+    Serial.println("client found");
+    
+    // an http request ends with a blank line
+    boolean currentLineIsBlank = true;
+    while (client.connected()) {
+      if (client.available()) {
+        char c = client.read();
+        Serial.write(c);
+        // if you've gotten to the end of the line (received a newline
+        // character) and the line is blank, the http request has ended,
+        // so you can send a reply
+        if (c == '\n' && currentLineIsBlank) {
+          Serial.print("returning config page");
+          client.print(prepareHtmlPage(scanResult));
+        }
+        if (c == '\n') {
+          // you're starting a new line
+          currentLineIsBlank = true;
+        } 
+        else if (c != '\r') {
+          // you've gotten a character on the current line
+          currentLineIsBlank = false;
         }
       }
-      // give the web browser time to receive the data
-      delay(1);
-      
-      // close the connection:
-      client.stop();
-      Serial.println("client disonnected");
     }
+    // give the web browser time to receive the data
+    delay(1);
+    
+    // close the connection:
+    client.stop();
+    Serial.println("client disonnected");
   }
+  Serial.print(".");
 }
 
 String prepareHtmlPage(scan scanResult)
 {
   String list = listNetworks(scanResult);
-  list += "</ul>";
   String htmlPage = 
      String("HTTP/1.1 200 OK\r\n") +
             "Content-Type: text/html\r\n" +
@@ -110,7 +110,7 @@ String prepareHtmlPage(scan scanResult)
             "\r\n" +
             "<!DOCTYPE HTML>" +
             "<html>" +
-            "Hello world" +
+            list +
             "</html>" +
             "\r\n";
   return htmlPage;
@@ -159,6 +159,7 @@ String listNetworks(scan scanResult) {
   Serial.println();
   for( unsigned int x = 0; x < scanResult.ssidCount; x++ ){
     network nw = scanResult.networks[x];
+    list += "<li>";
     list += "(";
     list += x;
     list +=") ";
@@ -167,6 +168,7 @@ String listNetworks(scan scanResult) {
     list += nw.rssi;
     list += "dBm Encryption: ";
     list += encryptionTypeToString(nw.encryptionType);
+    list += "</li>";
     Serial.print(x);
     Serial.print(") ");
     Serial.print(nw.ssid);
@@ -177,6 +179,8 @@ String listNetworks(scan scanResult) {
     Serial.println(encryptionTypeToString(nw.encryptionType)); 
   }
   list += "</ul>";
+  Serial.print("list: ");
+  Serial.println(list);
   return list;
 }
 
